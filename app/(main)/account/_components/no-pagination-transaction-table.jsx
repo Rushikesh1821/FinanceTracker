@@ -331,11 +331,11 @@ export function NoPaginationTransactionTable({ transactions }) {
                   <TableCell className="capitalize">
                     <span
                       style={{
-                        background: categoryColors[transaction.category],
+                        background: categoryColors[typeof transaction.category === 'string' ? transaction.category : transaction.category?.name || 'other-expense'],
                       }}
                       className="px-2 py-1 rounded text-white text-sm"
                     >
-                      {transaction.category}
+                      {typeof transaction.category === 'string' ? transaction.category : transaction.category?.name || 'Uncategorized'}
                     </span>
                   </TableCell>
                   <TableCell

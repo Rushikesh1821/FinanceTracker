@@ -3,8 +3,8 @@
 import { db } from "@/lib/prisma";
 import { subDays } from "date-fns";
 
-const ACCOUNT_ID = "account-id";
-const USER_ID = "user-id";
+const ACCOUNT_ID = "5915ad46-342e-4499-a321-7bece1c6578d";
+const USER_ID = "c74d99d6-01f2-45e9-b72c-5667f273a797";
 
 // Categories with their typical amount ranges
 const CATEGORIES = {
@@ -43,6 +43,34 @@ function getRandomCategory(type) {
 
 export async function seedTransactions() {
   try {
+    // Get current user and their accounts
+    const { auth, currentUser } = await import("@clerk/nextjs/server");
+    const { userId } = await auth();
+    
+    if (!userId) {
+      return { success: false, error: "User not authenticated" };
+    }
+
+    // Get user from database
+    const user = await db.user.findUnique({
+      where: { clerkUserId: userId },
+    });
+
+    if (!user) {
+      return { success: false, error: "User not found in database" };
+    }
+
+    // Get user's first account
+    const account = await db.account.findFirst({
+      where: { userId: user.id },
+    });
+
+    if (!account) {
+      return { success: false, error: "No account found for user" };
+    }
+
+    const ACCOUNT_ID = account.id;
+    const USER_ID = user.id;
     // Generate 90 days of transactions
     const transactions = [];
     let totalBalance = 0;

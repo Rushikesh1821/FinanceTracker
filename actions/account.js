@@ -50,14 +50,46 @@ export async function getAccountWithTransactions(accountId) {
 
 export async function bulkDeleteTransactions(transactionIds) {
   try {
+    console.log("Bulk delete called with:", transactionIds);
+    
     const { userId } = await auth();
-    if (!userId) throw new Error("Unauthorized");
+    if (!userId) {
+      console.error("Unauthorized - no userId");
+      return { success: false, error: "Unauthorized" };
+    }
 
-    const user = await db.user.findUnique({
+    let user = await db.user.findUnique({
       where: { clerkUserId: userId },
     });
 
-    if (!user) throw new Error("User not found");
+    if (!user) {
+      console.log("User not found by clerkUserId, checking by email");
+      // Check if user exists by email (might have been created with different clerkUserId)
+      const { currentUser } = await import("@clerk/nextjs/server");
+      const clerkUser = await currentUser();
+      if (clerkUser) {
+        const existingUserByEmail = await db.user.findUnique({
+          where: { email: clerkUser.emailAddresses[0].emailAddress },
+        });
+        
+        if (existingUserByEmail) {
+          // Update existing user with new clerkUserId
+          user = await db.user.update({
+            where: { id: existingUserByEmail.id },
+            data: { clerkUserId: userId },
+          });
+          console.log("Updated user clerkUserId:", user);
+        } else {
+          console.error("User not found by email either");
+          return { success: false, error: "User not found" };
+        }
+      } else {
+        console.error("No clerk user found");
+        return { success: false, error: "User not found" };
+      }
+    }
+
+    console.log("Found user:", user.id);
 
     // Get transactions to calculate balance changes
     const transactions = await db.transaction.findMany({
@@ -66,6 +98,13 @@ export async function bulkDeleteTransactions(transactionIds) {
         userId: user.id,
       },
     });
+
+    console.log("Found transactions to delete:", transactions.length);
+
+    if (transactions.length === 0) {
+      console.log("No transactions found to delete");
+      return { success: true, deletedCount: 0 };
+    }
 
     // Group transactions by account to update balances
     const accountBalanceChanges = transactions.reduce((acc, transaction) => {
@@ -77,36 +116,54 @@ export async function bulkDeleteTransactions(transactionIds) {
       return acc;
     }, {});
 
+    console.log("Account balance changes:", accountBalanceChanges);
+
     // Delete transactions and update account balances in a transaction
-    await db.$transaction(async (tx) => {
+    const result = await db.$transaction(async (tx) => {
+      console.log("Starting database transaction");
+      
       // Delete transactions
-      await tx.transaction.deleteMany({
+      const deleteResult = await tx.transaction.deleteMany({
         where: {
           id: { in: transactionIds },
           userId: user.id,
         },
       });
+      
+      console.log("Deleted transactions count:", deleteResult.count);
 
       // Update account balances
       for (const [accountId, balanceChange] of Object.entries(
         accountBalanceChanges
       )) {
-        await tx.account.update({
+        console.log(`Updating account ${accountId} balance by ${balanceChange}`);
+        const account = await tx.account.findUnique({
           where: { id: accountId },
-          data: {
-            balance: {
-              increment: balanceChange,
-            },
-          },
         });
+        
+        if (account) {
+          const newBalance = parseFloat(account.balance.toString()) + parseFloat(balanceChange.toString());
+          await tx.account.update({
+            where: { id: accountId },
+            data: {
+              balance: newBalance,
+            },
+          });
+        }
       }
+      
+      console.log("Database transaction completed");
+      return deleteResult.count;
     });
+
+    console.log("Final result:", result);
 
     revalidatePath("/dashboard");
     revalidatePath("/account/[id]");
 
-    return { success: true };
+    return { success: true, deletedCount: result };
   } catch (error) {
+    console.error("Bulk delete error:", error);
     return { success: false, error: error.message };
   }
 }
@@ -148,3 +205,4 @@ export async function updateDefaultAccount(accountId) {
     return { success: false, error: error.message };
   }
 }
+

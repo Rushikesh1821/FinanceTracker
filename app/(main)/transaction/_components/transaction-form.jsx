@@ -211,7 +211,7 @@ export function AddTransactionForm({
           </SelectTrigger>
           <SelectContent>
             {filteredCategories.map((category) => (
-              <SelectItem key={category.id} value={category.id}>
+              <SelectItem key={category.id} value={category.name}>
                 {category.name}
               </SelectItem>
             ))}

@@ -113,7 +113,9 @@ export function TransactionTable({ transactions }) {
           comparison = a.amount - b.amount;
           break;
         case "category":
-          comparison = a.category.localeCompare(b.category);
+          const catA = typeof a.category === 'string' ? a.category : a.category?.name || '';
+          const catB = typeof b.category === 'string' ? b.category : b.category?.name || '';
+          comparison = catA.localeCompare(catB);
           break;
         default:
           comparison = 0;
@@ -175,7 +177,16 @@ export function TransactionTable({ transactions }) {
     )
       return;
 
-    deleteFn(selectedIds);
+    console.log("Attempting to delete transactions:", selectedIds);
+    const result = await deleteFn(selectedIds);
+    console.log("Delete result:", result);
+    
+    if (result?.success) {
+      setSelectedIds([]);
+      toast.success("Transactions deleted successfully");
+    } else if (result?.error) {
+      toast.error(`Delete failed: ${result.error}`);
+    }
   };
 
   useEffect(() => {
@@ -362,11 +373,11 @@ export function TransactionTable({ transactions }) {
                   <TableCell className="capitalize">
                     <span
                       style={{
-                        background: categoryColors[transaction.category],
+                        background: categoryColors[typeof transaction.category === 'string' ? transaction.category : transaction.category?.name || 'other-expense'],
                       }}
                       className="px-2 py-1 rounded text-white text-sm"
                     >
-                      {transaction.category}
+                      {typeof transaction.category === 'string' ? transaction.category : transaction.category?.name || 'Uncategorized'}
                     </span>
                   </TableCell>
                   <TableCell

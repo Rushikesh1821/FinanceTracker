@@ -3,7 +3,7 @@
 import aj from "@/lib/arcjet";
 import { db } from "@/lib/prisma";
 import { request } from "@arcjet/next";
-import { auth } from "@clerk/nextjs/server";
+import { auth, currentUser } from "@clerk/nextjs/server";
 import { revalidatePath } from "next/cache";
 
 const serializeTransaction = (obj) => {
@@ -14,6 +14,10 @@ const serializeTransaction = (obj) => {
   if (obj.amount) {
     serialized.amount = obj.amount.toNumber();
   }
+  // Convert category object to string if needed
+  if (obj.category && typeof obj.category === 'object') {
+    serialized.category = obj.category.name || 'Uncategorized';
+  }
   return serialized;
 };
 
@@ -21,15 +25,42 @@ export async function getUserAccounts() {
   const { userId } = await auth();
   if (!userId) throw new Error("Unauthorized");
 
-  const user = await db.user.findUnique({
-    where: { clerkUserId: userId },
-  });
-
-  if (!user) {
-    throw new Error("User not found");
-  }
-
   try {
+    let user = await db.user.findUnique({
+      where: { clerkUserId: userId },
+    });
+
+    if (!user) {
+      // Check if user exists by email (might have been created with different clerkUserId)
+      const clerkUser = await currentUser();
+      if (clerkUser) {
+        const existingUserByEmail = await db.user.findUnique({
+          where: { email: clerkUser.emailAddresses[0].emailAddress },
+        });
+        
+        if (existingUserByEmail) {
+          // Update existing user with new clerkUserId
+          user = await db.user.update({
+            where: { id: existingUserByEmail.id },
+            data: { clerkUserId: userId },
+          });
+        } else {
+          // Create new user
+          const name = `${clerkUser.firstName} ${clerkUser.lastName}`;
+          user = await db.user.create({
+            data: {
+              clerkUserId: userId,
+              name,
+              imageUrl: clerkUser.imageUrl,
+              email: clerkUser.emailAddresses[0].emailAddress,
+            },
+          });
+        }
+      } else {
+        throw new Error("User not found");
+      }
+    }
+
     const accounts = await db.account.findMany({
       where: { userId: user.id },
       orderBy: { createdAt: "desc" },
@@ -47,14 +78,23 @@ export async function getUserAccounts() {
 
     return serializedAccounts;
   } catch (error) {
-    console.error(error.message);
+    console.error("Error in getUserAccounts:", error.message);
+    // Return empty array if user creation fails
+    return [];
   }
 }
 
 export async function createAccount(data) {
   try {
+    console.log("Creating account with data:", data);
+    
     const { userId } = await auth();
-    if (!userId) throw new Error("Unauthorized");
+    if (!userId) {
+      console.log("No userId found");
+      throw new Error("Unauthorized");
+    }
+
+    console.log("UserId found:", userId);
 
     // Get request data for ArcJet
     const req = await request();
@@ -135,22 +175,54 @@ export async function createAccount(data) {
 }
 
 export async function getDashboardData() {
-  const { userId } = await auth();
-  if (!userId) throw new Error("Unauthorized");
+  try {
+    const { userId } = await auth();
+    if (!userId) throw new Error("Unauthorized");
 
-  const user = await db.user.findUnique({
-    where: { clerkUserId: userId },
-  });
+    let user = await db.user.findUnique({
+      where: { clerkUserId: userId },
+    });
 
-  if (!user) {
-    throw new Error("User not found");
+    if (!user) {
+      // Check if user exists by email (might have been created with different clerkUserId)
+      const clerkUser = await currentUser();
+      if (clerkUser) {
+        const existingUserByEmail = await db.user.findUnique({
+          where: { email: clerkUser.emailAddresses[0].emailAddress },
+        });
+        
+        if (existingUserByEmail) {
+          // Update existing user with new clerkUserId
+          user = await db.user.update({
+            where: { id: existingUserByEmail.id },
+            data: { clerkUserId: userId },
+          });
+        } else {
+          // Create new user
+          const name = `${clerkUser.firstName} ${clerkUser.lastName}`;
+          user = await db.user.create({
+            data: {
+              clerkUserId: userId,
+              name,
+              imageUrl: clerkUser.imageUrl,
+              email: clerkUser.emailAddresses[0].emailAddress,
+            },
+          });
+        }
+      } else {
+        return []; // Return empty if can't create user
+      }
+    }
+
+    // Get all user transactions
+    const transactions = await db.transaction.findMany({
+      where: { userId: user.id },
+      orderBy: { date: "desc" },
+    });
+
+    return transactions.map(serializeTransaction);
+  } catch (error) {
+    console.error("Error in getDashboardData:", error.message);
+    return []; // Return empty array on error
   }
-
-  // Get all user transactions
-  const transactions = await db.transaction.findMany({
-    where: { userId: user.id },
-    orderBy: { date: "desc" },
-  });
-
-  return transactions.map(serializeTransaction);
 }

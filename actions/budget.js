@@ -9,12 +9,40 @@ export async function getCurrentBudget(accountId) {
     const { userId } = await auth();
     if (!userId) throw new Error("Unauthorized");
 
-    const user = await db.user.findUnique({
+    let user = await db.user.findUnique({
       where: { clerkUserId: userId },
     });
 
     if (!user) {
-      throw new Error("User not found");
+      // Check if user exists by email (might have been created with different clerkUserId)
+      const { currentUser } = await import("@clerk/nextjs/server");
+      const clerkUser = await currentUser();
+      if (clerkUser) {
+        const existingUserByEmail = await db.user.findUnique({
+          where: { email: clerkUser.emailAddresses[0].emailAddress },
+        });
+        
+        if (existingUserByEmail) {
+          // Update existing user with new clerkUserId
+          user = await db.user.update({
+            where: { id: existingUserByEmail.id },
+            data: { clerkUserId: userId },
+          });
+        } else {
+          // Create new user
+          const name = `${clerkUser.firstName} ${clerkUser.lastName}`;
+          user = await db.user.create({
+            data: {
+              clerkUserId: userId,
+              name,
+              imageUrl: clerkUser.imageUrl,
+              email: clerkUser.emailAddresses[0].emailAddress,
+            },
+          });
+        }
+      } else {
+        return null; // Return null if can't create user
+      }
     }
 
     const budget = await db.budget.findFirst({
@@ -59,7 +87,7 @@ export async function getCurrentBudget(accountId) {
     };
   } catch (error) {
     console.error("Error fetching budget:", error);
-    throw error;
+    return null; // Return null on error
   }
 }
 

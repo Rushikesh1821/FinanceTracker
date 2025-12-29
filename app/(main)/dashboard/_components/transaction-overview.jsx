@@ -42,10 +42,10 @@ export function DashboardOverview({ accounts, transactions }) {
     (t) => t.accountId === selectedAccountId
   );
 
-  // Get recent transactions (last 5)
+  // Get recent transactions (last 20)
   const recentTransactions = accountTransactions
     .sort((a, b) => new Date(b.date) - new Date(a.date))
-    .slice(0, 5);
+    .slice(0, 20);
 
   // Calculate expense breakdown for current month
   const currentDate = new Date();
@@ -61,10 +61,13 @@ export function DashboardOverview({ accounts, transactions }) {
   // Group expenses by category
   const expensesByCategory = currentMonthExpenses.reduce((acc, transaction) => {
     const category = transaction.category;
-    if (!acc[category]) {
-      acc[category] = 0;
+    // Handle both string and object category formats
+    const categoryName = typeof category === 'string' ? category : category?.name || 'Uncategorized';
+    
+    if (!acc[categoryName]) {
+      acc[categoryName] = 0;
     }
-    acc[category] += transaction.amount;
+    acc[categoryName] += transaction.amount;
     return acc;
   }, {});
 
