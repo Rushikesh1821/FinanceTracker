@@ -7,7 +7,7 @@ export async function sendEmail({ to, subject, react }) {
 
   try {
     const data = await resend.emails.send({
-      from: "Finance App <onboarding@resend.dev>",
+      from: "Finance App <your-email@yourdomain.com>", // Update with your verified domain
       to,
       subject,
       react,
