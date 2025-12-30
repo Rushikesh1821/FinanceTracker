@@ -95,16 +95,26 @@ export function AddTransactionForm({
   };
 
   const handleScanComplete = (scannedData) => {
+    console.log("handleScanComplete called with:", scannedData);
+    
     if (scannedData) {
-      setValue("amount", scannedData.amount.toString());
-      setValue("date", new Date(scannedData.date));
-      if (scannedData.description) {
-        setValue("description", scannedData.description);
+      try {
+        console.log("Setting form values...");
+        setValue("amount", scannedData.amount.toString());
+        setValue("date", new Date(scannedData.date));
+        if (scannedData.description) {
+          setValue("description", scannedData.description);
+        }
+        if (scannedData.category) {
+          setValue("category", scannedData.category);
+        }
+        toast.success("Receipt scanned successfully");
+      } catch (error) {
+        console.error("Error setting form values:", error);
+        toast.error("Failed to fill form with scanned data");
       }
-      if (scannedData.category) {
-        setValue("category", scannedData.category);
-      }
-      toast.success("Receipt scanned successfully");
+    } else {
+      console.log("No scanned data provided");
     }
   };
 

@@ -1,10 +1,17 @@
 import { sendEmail } from "@/actions/send-email";
 import EmailTemplate from "@/emails/template";
+import aj from "@/lib/arcjet";
 
-export async function POST() {
+export async function POST(request) {
+  const decision = await aj.protect(request);
+  
+  if (decision.isDenied()) {
+    return Response.json({ error: "Too many requests" }, { status: 429 });
+  }
+  
   try {
     const result = await sendEmail({
-      to: "your-email@example.com", // Update with your email
+      to: "rushigaikawad66@gmail.com", // Your registered Resend email
       subject: "Test Email from Finance Platform",
       react: EmailTemplate({
         userName: "Test User",

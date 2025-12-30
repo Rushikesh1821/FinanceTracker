@@ -7,7 +7,7 @@ import { GoogleGenerativeAI } from "@google/generative-ai";
 import aj from "@/lib/arcjet";
 import { request } from "@arcjet/next";
 
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || "AIzaSyBrg1hWQl0QjhU6Hqatq_-ba2FU1EzH6EE");
 
 const serializeAmount = (obj) => ({
   ...obj,
@@ -230,12 +230,17 @@ export async function getUserTransactions(query = {}) {
 // Scan Receipt
 export async function scanReceipt(file) {
   try {
-    const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+    console.log("Starting receipt scan for file:", file.name, file.type, file.size);
+    
+    // Use the correct free model name
+    const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
 
-    // Convert File to ArrayBuffer
+    // Convert File to base64 using Node.js Buffer
     const arrayBuffer = await file.arrayBuffer();
-    // Convert ArrayBuffer to Base64
-    const base64String = Buffer.from(arrayBuffer).toString("base64");
+    const buffer = Buffer.from(arrayBuffer);
+    const base64String = buffer.toString('base64');
+    
+    console.log("File converted to base64, length:", base64String.length);
 
     const prompt = `
       Analyze this receipt image and extract the following information in JSON format:
@@ -267,12 +272,17 @@ export async function scanReceipt(file) {
       prompt,
     ]);
 
+    console.log("Gemini API call completed");
     const response = await result.response;
     const text = response.text();
+    console.log("Raw Gemini response:", text);
+    
     const cleanedText = text.replace(/```(?:json)?\n?/g, "").trim();
+    console.log("Cleaned response:", cleanedText);
 
     try {
       const data = JSON.parse(cleanedText);
+      console.log("Parsed data:", data);
       return {
         amount: parseFloat(data.amount),
         date: new Date(data.date),
@@ -282,7 +292,27 @@ export async function scanReceipt(file) {
       };
     } catch (parseError) {
       console.error("Error parsing JSON response:", parseError);
-      throw new Error("Invalid response format from Gemini");
+      console.error("Cleaned text that failed to parse:", cleanedText);
+      console.error("Raw response:", text);
+      
+      // Try to extract data from non-JSON response
+      const amountMatch = text.match(/amount[:\s]*([\d.]+)/i);
+      const dateMatch = text.match(/date[:\s]*(\d{4}-\d{2}-\d{2})/i);
+      const descMatch = text.match(/description[:\s]*([^\n]+)/i);
+      const merchantMatch = text.match(/merchant[:\s]*([^\n]+)/i);
+      const categoryMatch = text.match(/category[:\s]*([^\n]+)/i);
+      
+      if (amountMatch || dateMatch || descMatch) {
+        return {
+          amount: amountMatch ? parseFloat(amountMatch[1]) : 0,
+          date: dateMatch ? new Date(dateMatch[1]) : new Date(),
+          description: descMatch ? descMatch[1].trim() : "Receipt scan",
+          category: categoryMatch ? categoryMatch[1].trim() : "other-expense",
+          merchantName: merchantMatch ? merchantMatch[1].trim() : "Unknown",
+        };
+      }
+      
+      throw new Error("Could not extract data from Gemini response");
     }
   } catch (error) {
     console.error("Error scanning receipt:", error);
