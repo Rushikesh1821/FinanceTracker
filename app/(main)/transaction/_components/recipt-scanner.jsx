@@ -32,7 +32,11 @@ export function ReceiptScanner({ onScanComplete }) {
       }
     } catch (error) {
       console.error("Receipt scan error:", error);
-      toast.error(error.message || "Failed to scan receipt");
+      const msg = error?.message || (typeof error === 'string' ? error : JSON.stringify(error));
+      // Log more details for easier debugging
+      console.error("Receipt scan message:", msg);
+      if (error?.stack) console.error("Receipt scan stack:", error.stack);
+      toast.error(msg || "Failed to scan receipt");
     } finally {
       setLoading(false);
     }

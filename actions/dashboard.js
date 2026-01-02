@@ -5,6 +5,7 @@ import { db } from "@/lib/prisma";
 import { request } from "@arcjet/next";
 import { auth, currentUser } from "@clerk/nextjs/server";
 import { revalidatePath } from "next/cache";
+import { getOrCreateUserByClerkId } from "@/lib/getOrCreateUser";
 
 const serializeTransaction = (obj) => {
   const serialized = { ...obj };
@@ -26,40 +27,7 @@ export async function getUserAccounts() {
   if (!userId) throw new Error("Unauthorized");
 
   try {
-    let user = await db.user.findUnique({
-      where: { clerkUserId: userId },
-    });
-
-    if (!user) {
-      // Check if user exists by email (might have been created with different clerkUserId)
-      const clerkUser = await currentUser();
-      if (clerkUser) {
-        const existingUserByEmail = await db.user.findUnique({
-          where: { email: clerkUser.emailAddresses[0].emailAddress },
-        });
-        
-        if (existingUserByEmail) {
-          // Update existing user with new clerkUserId
-          user = await db.user.update({
-            where: { id: existingUserByEmail.id },
-            data: { clerkUserId: userId },
-          });
-        } else {
-          // Create new user
-          const name = `${clerkUser.firstName} ${clerkUser.lastName}`;
-          user = await db.user.create({
-            data: {
-              clerkUserId: userId,
-              name,
-              imageUrl: clerkUser.imageUrl,
-              email: clerkUser.emailAddresses[0].emailAddress,
-            },
-          });
-        }
-      } else {
-        throw new Error("User not found");
-      }
-    }
+    const user = await getOrCreateUserByClerkId(userId);
 
     const accounts = await db.account.findMany({
       where: { userId: user.id },
@@ -122,13 +90,8 @@ export async function createAccount(data) {
       throw new Error("Request blocked");
     }
 
-    const user = await db.user.findUnique({
-      where: { clerkUserId: userId },
-    });
-
-    if (!user) {
-      throw new Error("User not found");
-    }
+    const user = await getOrCreateUserByClerkId(userId);
+    console.log("DB user in createAccount:", user);
 
     // Convert balance to float before saving
     const balanceFloat = parseFloat(data.balance);
@@ -170,7 +133,8 @@ export async function createAccount(data) {
     revalidatePath("/dashboard");
     return { success: true, data: serializedAccount };
   } catch (error) {
-    throw new Error(error.message);
+    console.error("createAccount error:", error);
+    throw error;
   }
 }
 
@@ -179,40 +143,7 @@ export async function getDashboardData() {
     const { userId } = await auth();
     if (!userId) throw new Error("Unauthorized");
 
-    let user = await db.user.findUnique({
-      where: { clerkUserId: userId },
-    });
-
-    if (!user) {
-      // Check if user exists by email (might have been created with different clerkUserId)
-      const clerkUser = await currentUser();
-      if (clerkUser) {
-        const existingUserByEmail = await db.user.findUnique({
-          where: { email: clerkUser.emailAddresses[0].emailAddress },
-        });
-        
-        if (existingUserByEmail) {
-          // Update existing user with new clerkUserId
-          user = await db.user.update({
-            where: { id: existingUserByEmail.id },
-            data: { clerkUserId: userId },
-          });
-        } else {
-          // Create new user
-          const name = `${clerkUser.firstName} ${clerkUser.lastName}`;
-          user = await db.user.create({
-            data: {
-              clerkUserId: userId,
-              name,
-              imageUrl: clerkUser.imageUrl,
-              email: clerkUser.emailAddresses[0].emailAddress,
-            },
-          });
-        }
-      } else {
-        return []; // Return empty if can't create user
-      }
-    }
+    const user = await getOrCreateUserByClerkId(userId);
 
     // Get all user transactions
     const transactions = await db.transaction.findMany({

@@ -3,6 +3,7 @@
 import { db } from "@/lib/prisma";
 import { auth } from "@clerk/nextjs/server";
 import { revalidatePath } from "next/cache";
+import { getOrCreateUserByClerkId } from "@/lib/getOrCreateUser";
 
 const serializeDecimal = (obj) => {
   const serialized = { ...obj };
@@ -19,11 +20,7 @@ export async function getAccountWithTransactions(accountId) {
   const { userId } = await auth();
   if (!userId) throw new Error("Unauthorized");
 
-  const user = await db.user.findUnique({
-    where: { clerkUserId: userId },
-  });
-
-  if (!user) throw new Error("User not found");
+  const user = await getOrCreateUserByClerkId(userId);
 
   const account = await db.account.findUnique({
     where: {
@@ -58,37 +55,7 @@ export async function bulkDeleteTransactions(transactionIds) {
       return { success: false, error: "Unauthorized" };
     }
 
-    let user = await db.user.findUnique({
-      where: { clerkUserId: userId },
-    });
-
-    if (!user) {
-      console.log("User not found by clerkUserId, checking by email");
-      // Check if user exists by email (might have been created with different clerkUserId)
-      const { currentUser } = await import("@clerk/nextjs/server");
-      const clerkUser = await currentUser();
-      if (clerkUser) {
-        const existingUserByEmail = await db.user.findUnique({
-          where: { email: clerkUser.emailAddresses[0].emailAddress },
-        });
-        
-        if (existingUserByEmail) {
-          // Update existing user with new clerkUserId
-          user = await db.user.update({
-            where: { id: existingUserByEmail.id },
-            data: { clerkUserId: userId },
-          });
-          console.log("Updated user clerkUserId:", user);
-        } else {
-          console.error("User not found by email either");
-          return { success: false, error: "User not found" };
-        }
-      } else {
-        console.error("No clerk user found");
-        return { success: false, error: "User not found" };
-      }
-    }
-
+    const user = await getOrCreateUserByClerkId(userId);
     console.log("Found user:", user.id);
 
     // Get transactions to calculate balance changes
@@ -173,13 +140,7 @@ export async function updateDefaultAccount(accountId) {
     const { userId } = await auth();
     if (!userId) throw new Error("Unauthorized");
 
-    const user = await db.user.findUnique({
-      where: { clerkUserId: userId },
-    });
-
-    if (!user) {
-      throw new Error("User not found");
-    }
+    const user = await getOrCreateUserByClerkId(userId);
 
     // First, unset any existing default account
     await db.account.updateMany({

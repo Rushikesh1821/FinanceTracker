@@ -2,6 +2,7 @@
 
 import { auth } from "@clerk/nextjs/server";
 import { db } from "@/lib/prisma";
+import { getOrCreateUserByClerkId } from "@/lib/getOrCreateUser";
 import { revalidatePath } from "next/cache";
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import aj from "@/lib/arcjet";
@@ -46,13 +47,7 @@ export async function createTransaction(data) {
       throw new Error("Request blocked");
     }
 
-    const user = await db.user.findUnique({
-      where: { clerkUserId: userId },
-    });
-
-    if (!user) {
-      throw new Error("User not found");
-    }
+    const user = await getOrCreateUserByClerkId(userId);
 
     const account = await db.account.findUnique({
       where: {
@@ -95,7 +90,8 @@ export async function createTransaction(data) {
 
     return { success: true, data: serializeAmount(transaction) };
   } catch (error) {
-    throw new Error(error.message);
+    console.error("createTransaction error:", error);
+    throw error;
   }
 }
 
@@ -103,11 +99,7 @@ export async function getTransaction(id) {
   const { userId } = await auth();
   if (!userId) throw new Error("Unauthorized");
 
-  const user = await db.user.findUnique({
-    where: { clerkUserId: userId },
-  });
-
-  if (!user) throw new Error("User not found");
+  const user = await getOrCreateUserByClerkId(userId);
 
   const transaction = await db.transaction.findUnique({
     where: {
@@ -126,11 +118,7 @@ export async function updateTransaction(id, data) {
     const { userId } = await auth();
     if (!userId) throw new Error("Unauthorized");
 
-    const user = await db.user.findUnique({
-      where: { clerkUserId: userId },
-    });
-
-    if (!user) throw new Error("User not found");
+    const user = await getOrCreateUserByClerkId(userId);
 
     // Get original transaction to calculate balance change
     const originalTransaction = await db.transaction.findUnique({
@@ -190,7 +178,8 @@ export async function updateTransaction(id, data) {
 
     return { success: true, data: serializeAmount(transaction) };
   } catch (error) {
-    throw new Error(error.message);
+    console.error("updateTransaction error:", error);
+    throw error;
   }
 }
 
@@ -200,13 +189,7 @@ export async function getUserTransactions(query = {}) {
     const { userId } = await auth();
     if (!userId) throw new Error("Unauthorized");
 
-    const user = await db.user.findUnique({
-      where: { clerkUserId: userId },
-    });
-
-    if (!user) {
-      throw new Error("User not found");
-    }
+    const user = await getOrCreateUserByClerkId(userId);
 
     const transactions = await db.transaction.findMany({
       where: {
@@ -223,15 +206,23 @@ export async function getUserTransactions(query = {}) {
 
     return { success: true, data: transactions };
   } catch (error) {
-    throw new Error(error.message);
+    console.error("getUserTransactions error:", error);
+    throw error;
   }
 }
+
+import { parseReceiptResponse } from "@/lib/receiptParser";
 
 // Scan Receipt
 export async function scanReceipt(file) {
   try {
     console.log("Starting receipt scan for file:", file.name, file.type, file.size);
-    
+
+    if (!process.env.GEMINI_API_KEY) {
+      console.error("GEMINI_API_KEY is not set");
+      throw new Error("GEMINI_API_KEY is not set");
+    }
+
     // Use the correct free model name
     const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
 
@@ -262,61 +253,63 @@ export async function scanReceipt(file) {
       If its not a recipt, return an empty object
     `;
 
-    const result = await model.generateContent([
-      {
-        inlineData: {
-          data: base64String,
-          mimeType: file.type,
-        },
-      },
-      prompt,
-    ]);
+    // Helper to call Gemini with a small retry for transient image errors
+    async function callModelWithRetry(attempts = 2) {
+      let lastErr;
+      for (let i = 0; i < attempts; i++) {
+        try {
+          const res = await model.generateContent([
+            {
+              inlineData: {
+                data: base64String,
+                mimeType: file.type,
+              },
+            },
+            prompt,
+          ]);
+          return res;
+        } catch (err) {
+          lastErr = err;
+          // If it's an image processing error (400) try one more time
+          if (err && err.status === 400 && i < attempts - 1) {
+            console.warn("Gemini returned 400 for image input; retrying after delay...", err.message);
+            await new Promise((r) => setTimeout(r, 1000));
+            continue;
+          }
+          throw err;
+        }
+      }
+      throw lastErr;
+    }
+
+    const result = await callModelWithRetry(2);
 
     console.log("Gemini API call completed");
     const response = await result.response;
     const text = response.text();
     console.log("Raw Gemini response:", text);
     
-    const cleanedText = text.replace(/```(?:json)?\n?/g, "").trim();
-    console.log("Cleaned response:", cleanedText);
-
+    let parsed;
     try {
-      const data = JSON.parse(cleanedText);
-      console.log("Parsed data:", data);
-      return {
-        amount: parseFloat(data.amount),
-        date: new Date(data.date),
-        description: data.description,
-        category: data.category,
-        merchantName: data.merchantName,
-      };
+      parsed = parseReceiptResponse(text);
     } catch (parseError) {
-      console.error("Error parsing JSON response:", parseError);
-      console.error("Cleaned text that failed to parse:", cleanedText);
+      console.error("Error parsing Gemini response:", parseError);
       console.error("Raw response:", text);
-      
-      // Try to extract data from non-JSON response
-      const amountMatch = text.match(/amount[:\s]*([\d.]+)/i);
-      const dateMatch = text.match(/date[:\s]*(\d{4}-\d{2}-\d{2})/i);
-      const descMatch = text.match(/description[:\s]*([^\n]+)/i);
-      const merchantMatch = text.match(/merchant[:\s]*([^\n]+)/i);
-      const categoryMatch = text.match(/category[:\s]*([^\n]+)/i);
-      
-      if (amountMatch || dateMatch || descMatch) {
-        return {
-          amount: amountMatch ? parseFloat(amountMatch[1]) : 0,
-          date: dateMatch ? new Date(dateMatch[1]) : new Date(),
-          description: descMatch ? descMatch[1].trim() : "Receipt scan",
-          category: categoryMatch ? categoryMatch[1].trim() : "other-expense",
-          merchantName: merchantMatch ? merchantMatch[1].trim() : "Unknown",
-        };
-      }
-      
-      throw new Error("Could not extract data from Gemini response");
+      throw new Error(parseError.message || "Could not extract data from Gemini response");
     }
+
+    // Normalize parsed data
+    return {
+      amount: parsed.amount ? parseFloat(parsed.amount) : 0,
+      date: parsed.date ? new Date(parsed.date) : new Date(),
+      description: parsed.description || "Receipt scan",
+      category: parsed.category || "other-expense",
+      merchantName: parsed.merchantName || parsed.merchant || "Unknown",
+    };
   } catch (error) {
     console.error("Error scanning receipt:", error);
-    throw new Error("Failed to scan receipt");
+    // Provide the original error message for easier debugging in dev
+    throw new Error(error?.message || "Failed to scan receipt");
   }
 }
 
