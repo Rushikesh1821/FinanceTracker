@@ -49,7 +49,7 @@ import {
 } from "@/components/ui/tooltip";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
-import { categoryColors } from "@/data/categories";
+import { getCategoryDisplay } from "@/data/categories";
 import { bulkDeleteTransactions } from "@/actions/account";
 import useFetch from "@/hooks/use-fetch";
 import { BarLoader } from "react-spinners";
@@ -371,14 +371,24 @@ export function TransactionTable({ transactions }) {
                   </TableCell>
                   <TableCell>{transaction.description}</TableCell>
                   <TableCell className="capitalize">
-                    <span
-                      style={{
-                        background: categoryColors[typeof transaction.category === 'string' ? transaction.category : transaction.category?.name || 'other-expense'],
-                      }}
-                      className="px-2 py-1 rounded text-white text-sm"
-                    >
-                      {typeof transaction.category === 'string' ? transaction.category : transaction.category?.name || 'Uncategorized'}
-                    </span>
+                    {(() => {
+                      const { label, color, textColor, isFallback } = getCategoryDisplay(
+                        transaction.category
+                      );
+
+                      return (
+                        <span
+                          style={{
+                            backgroundColor: color,
+                            color: textColor,
+                            border: isFallback ? "1px solid #cbd5e1" : "none",
+                          }}
+                          className="px-2 py-1 rounded text-sm font-medium"
+                        >
+                          {label}
+                        </span>
+                      );
+                    })()}
                   </TableCell>
                   <TableCell
                     className={cn(

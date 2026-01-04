@@ -161,7 +161,75 @@ export const defaultCategories = [
   },
 ];
 
+// Normalize category identifiers so we can look up colors whether the value is
+// stored as an id ("other-expense") or a human readable name ("Other Expenses").
+export const normalizeCategoryKey = (value) =>
+  value?.toString().trim().toLowerCase().replace(/\s+/g, "-") || "";
+
+const DEFAULT_CATEGORY_COLOR = "#e5e7eb"; // slate-200 fallback
+
 export const categoryColors = defaultCategories.reduce((acc, category) => {
-  acc[category.id] = category.color;
+  const keys = [category.id, category.name, normalizeCategoryKey(category.name)];
+  keys.forEach((key) => {
+    const normalized = normalizeCategoryKey(key);
+    if (normalized) acc[normalized] = category.color;
+  });
   return acc;
 }, {});
+
+// Determine whether white or dark text will be more readable on the given
+// background color by computing relative luminance.
+const hexToRgb = (hex) => {
+  const normalized = hex.replace('#', '');
+  if (normalized.length === 3) {
+    return normalized
+      .split('')
+      .map((c) => parseInt(c + c, 16));
+  }
+  return [
+    parseInt(normalized.substring(0, 2), 16),
+    parseInt(normalized.substring(2, 4), 16),
+    parseInt(normalized.substring(4, 6), 16),
+  ];
+};
+
+const relativeLuminance = (r, g, b) => {
+  const srgb = [r, g, b].map((c) => {
+    const v = c / 255;
+    return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4);
+  });
+  return 0.2126 * srgb[0] + 0.7152 * srgb[1] + 0.0722 * srgb[2];
+};
+
+const contrastTextColor = (hex) => {
+  try {
+    const [r, g, b] = hexToRgb(hex);
+    const lum = relativeLuminance(r, g, b);
+    // if background is light (luminance > 0.5), use dark text; else white
+    return lum > 0.5 ? '#0f172a' : '#ffffff';
+  } catch (e) {
+    return '#0f172a';
+  }
+};
+
+// Helper to safely derive display data for a category value from transactions.
+export const getCategoryDisplay = (categoryValue) => {
+  const label =
+    typeof categoryValue === "string"
+      ? categoryValue
+      : categoryValue?.name || "Uncategorized";
+
+  const normalizedKey = normalizeCategoryKey(
+    typeof categoryValue === "string"
+      ? categoryValue
+      : categoryValue?.id || categoryValue?.name
+  );
+
+  const color = categoryColors[normalizedKey] || DEFAULT_CATEGORY_COLOR;
+  const textColor = contrastTextColor(color);
+  const isFallback = color === DEFAULT_CATEGORY_COLOR;
+
+  return { label, color, textColor, isFallback };
+};
+
+export const defaultCategoryColor = DEFAULT_CATEGORY_COLOR;
