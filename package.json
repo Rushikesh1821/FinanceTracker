@@ -6,7 +6,7 @@
     "node": ">=18 <=20"
   },
   "scripts": {
-    "dev": "next dev",
+    "dev": "next dev -p 3001",
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
@@ -15,9 +15,12 @@
   },
   "dependencies": {
     "@arcjet/next": "^1.0.0-alpha.34",
-    "@clerk/nextjs": "^6.36.5",
+    "@clerk/backend": "^3.16.10",
+    "@clerk/clerk-react": "^5.61.3",
+    "@clerk/nextjs": "^7.8.0",
+    "@clerk/shared": "^4.29.3",
     "@google/generative-ai": "^0.21.0",
-    "@hookform/resolvers": "^3.9.1",
+    "@hookform/resolvers": "^3.10.0",
     "@prisma/client": "^6.0.1",
     "@radix-ui/react-checkbox": "^1.1.2",
     "@radix-ui/react-dialog": "^1.1.2",
@@ -57,5 +60,8 @@
     "prisma": "^6.0.1",
     "react-email": "^3.0.3",
     "tailwindcss": "^3.4.1"
+  },
+  "optionalDependencies": {
+    "@next/swc-win32-x64-msvc": "^16.3.3"
   }
 }

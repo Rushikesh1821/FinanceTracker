@@ -14,6 +14,9 @@ const nextConfig = {
       bodySizeLimit: "5mb",
     },
   },
+
+  // Disable source maps in production to reduce memory usage
+  productionBrowserSourceMaps: false,
 };
 
 export default nextConfig;
